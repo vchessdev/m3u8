@@ -1,0 +1,89 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+
+# Flask
+instance/
+.webassets-cache
+.env
+.env.local
+
+# Playwright
+.playwright/
+ms-playwright/
+
+# Logs
+*.log
+logs/
+tv360_proxy.log
+
+# Cache
+.cache/
+.pytest_cache/
+.coverage
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# OS
+Thumbs.db
+.Thumbs.db
+
+# Temp files
+*.tmp
+*.bak
+*.backup
+*.temp
+
+# Test results
+test_results/
+htmlcov/
+
+# Video/Media files (don't commit media)
+*.m3u8
+*.ts
+*.m4s
+*.mp4
+
+# Dev only
+dev/
+sandbox/
+scratch/
