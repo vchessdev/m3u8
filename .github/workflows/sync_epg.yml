@@ -16,105 +16,105 @@ jobs:
     - name: Kiểm tra mã nguồn
       uses: actions/checkout@v4
 
-    - name: Cài đặt NodeJS và Puppeteer
-      uses: actions/setup-node@v4
-      with:
-        node-version: 20
-
-    - name: Cài đặt thư viện Puppeteer
-      run: npm install puppeteer
-
-    - name: Chạy script giả lập trình duyệt cào JSON
+    - name: Ép múi giờ hệ thống VN
       run: |
-        node -e "
-        const puppeteer = require('puppeteer');
-        const fs = require('fs');
+        sudo ln -sf /usr/share/zoneinfo/Asia/Ho_Chi_Minh /etc/localtime
+        echo "Asia/Ho_Chi_Minh" | sudo tee /etc/timezone
 
-        (async () => {
-            console.log('🚀 Đang khởi động trình duyệt giả lập để vượt Cloudflare...');
-            const browser = await puppeteer.launch({
-                headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
-            });
-            const page = await browser.newPage();
+    - name: Cài đặt PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+
+    - name: Chạy kịch bản vượt Cloudflare bằng Cổng Xoay IP
+      run: |
+        php -r '
+        date_default_timezone_set("Asia/Ho_Chi_Minh");
+        $today = date("Y-m-d");
+        $vtv6_m3u8 = "https://devda.undo.it/Stream/index.php?id=vtv6&ext=.m3u8";
+        $target_url = "https://vnepg.site/api/schedule/vtv6hd";
+        
+        // CÁC CỔNG KHÔNG BỊ TRÙNG IP DATACENTER VÀ TỰ GIẢI MÃ CLOUDFLARE
+        $proxies = [
+            "https://corsproxy.io/?" . urlencode($target_url),
+            "https://api.codetabs.com/v1/proxy/?quest=" . urlencode($target_url)
+        ];
+        
+        $api_data = null;
+        foreach ($proxies as $url) {
+            echo "🔄 Đang đi đường vòng qua cổng chuyên dụng: $url\n";
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+            // Bơm Header giả lập như trình duyệt xịn đang gọi qua proxy
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0",
+                "Accept: application/json, text/plain, */*",
+                "Accept-Language: vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7"
+            ]);
+            $res = curl_exec($ch);
+            curl_close($ch);
             
-            // Giả lập User-Agent của trình duyệt máy tính thật
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-            try {
-                console.log('🔄 Đang truy cập vào API vnepg.site...');
-                await page.goto('https://vnepg.site/api/schedule/vtv6hd', { waitUntil: 'networkidle2', timeout: 60000 });
+            $decoded = json_decode($res, true);
+            if (is_array($decoded) && isset($decoded["items"])) {
+                $api_data = $decoded;
+                echo "✅ ĐÃ BẺ GÃY CLOUDFLARE THÀNH CÔNG!\n";
+                break;
+            }
+        }
+        
+        if (!$api_data) {
+            echo "⚠️ Cảnh báo: Các cổng tự động đều bị Cloudflare siết chặt.\n";
+            echo "🤖 Kích hoạt chế độ cứu hộ: Đọc dữ liệu trực tiếp thô từ hệ thống fallback...\n";
+            // Nếu tạch hết do Cloudflare chặn gắt hôm nay, tải thẳng link dự phòng dạng thô
+            $res = @file_get_contents("https://api.codetabs.com/v1/proxy/?quest=" . urlencode($target_url));
+            $api_data = json_decode($res, true);
+        }
+        
+        if (!is_array($api_data) || !isset($api_data["items"])) {
+            die("❌ THẤT BẠI CHÍ MẠNG: Cloudflare khóa toàn bộ lối đi. Kết thúc build để bảo vệ file cũ.\n");
+        }
+        
+        $matches = [];
+        foreach ($api_data["items"] as $prog) {
+            $title = $prog["title"] ?? "";
+            $desc = $prog["desc"] ?? "";
+            $full_text = $title . " " . $desc;
+            
+            // Quét từ khóa thông minh chấp cả lỗi chính tả "Worl Cup"
+            if (stripos($full_text, "World") !== false || stripos($full_text, "Worl") !== false || stripos($full_text, "Bóng") !== false || stripos($full_text, "thể thao") !== false) {
                 
-                // Lấy nội dung văn bản hiển thị trên trang (chuỗi JSON thô)
-                const rawText = await page.evaluate(() => document.body.innerText);
+                $start_ts = isset($prog["startMs"]) ? intval($prog["startMs"] / 1000) : 0;
+                $stop_ts = isset($prog["stopMs"]) ? intval($prog["stopMs"] / 1000) : 0;
                 
-                // Thử giải mã chuỗi JSON kiểm tra cấu trúc
-                const apiData = JSON.parse(rawText);
-                
-                if (!apiData || !apiData.items) {
-                    throw new Error('Cấu trúc JSON nhận được không có mục items');
-                }
-                
-                console.log('✅ Đã vượt Cloudflare và lấy dữ liệu thành công!');
-                
-                // Định dạng múi giờ Việt Nam để lọc ngày
-                const tzOffset = 7 * 60 * 60 * 1000; // GMT+7
-                const todayStr = new Date(Date.now() + tzOffset).toISOString().split('T')[0];
-                
-                const vtv6_m3u8 = 'https://devda.undo.it/Stream/index.php?id=vtv6&ext=.m3u8';
-                const matches = [];
-
-                for (const prog of apiData.items) {
-                    const title = prog.title || '';
-                    const desc = prog.desc || '';
-                    const fullText = (title + ' ' + desc).toLowerCase();
+                if ($start_ts > 0 && $stop_ts > 0) {
+                    $match_date = date("Y-m-d", $start_ts);
                     
-                    // Lọc theo từ khóa (Bắt cả lỗi chính tả Worl Cup)
-                    if (fullText.includes('world') || fullText.includes('worl') || fullText.includes('bóng') || fullText.includes('thể thao')) {
-                        const startTs = prog.startMs ? Math.floor(prog.startMs / 1000) : 0;
-                        const stopTs = prog.stopMs ? Math.floor(prog.stopMs / 1000) : 0;
-                        
-                        if (startTs > 0 && stopTs > 0) {
-                            const matchDateStr = new Date((startTs * 1000) + tzOffset).toISOString().split('T')[0];
-                            
-                            // Chỉ lấy trận đấu thuộc ngày hôm nay
-                            if (matchDateStr === todayStr) {
-                                // Hàm format định dạng giờ H:i
-                                const formatTime = (ts) => {
-                                    const d = new Date((ts * 1000) + tzOffset);
-                                    return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
-                                };
-
-                                matches.push({
-                                    id: 'epg_wc_' + Math.random().toString(36).substr(2, 9),
-                                    day: todayStr,
-                                    start_time: formatTime(startTs),
-                                    end_time: formatTime(stopTs),
-                                    m3u8_url: vtv6_m3u8,
-                                    created_at: new Date(Date.now() + tzOffset).toISOString().replace('T', ' ').substr(0, 19) + ' (Puppeteer: ' + (desc ? desc : title) + ')'
-                                });
-                            }
-                        }
+                    if ($match_date === $today) {
+                        $matches[] = [
+                            "id" => "epg_wc_" . uniqid(),
+                            "day" => $today,
+                            "start_time" => date("H:i", $start_ts),
+                            "end_time" => date("H:i", $stop_ts),
+                            "m3u8_url" => $vtv6_m3u8,
+                            "created_at" => date("Y-m-d H:i:s") . " (" . ($desc ? $desc : $title) . ")"
+                        ];
                     }
                 }
-
-                // Ghi dữ liệu sạch vào file worldcup.json
-                fs.writeFileSync('worldcup.json', JSON.stringify(matches, null, 4), 'utf8');
-                console.log('=== KẾT QUẢ CÀO TỪ TRÌNH DUYỆT ===');
-                console.log('Đã lọc và ghi thành công ' + matches.length + ' trận đấu vào file worldcup.json');
-
-            } catch (error) {
-                console.error('❌ LỖI TRONG QUÁ TRÌNH CHẠY SCRIPT:', error.message);
-                process.exit(1);
-            } finally {
-                await browser.close();
             }
-        })();
-        "
+        }
+        
+        file_put_contents("worldcup.json", json_encode($matches, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+        echo "=== KẾT QUẢ ĐÓNG GÓI ===\n";
+        echo "Tìm thấy và nạp " . count($matches) . " trận đấu phù hợp vào worldcup.json\n";
+        '
 
-    - name: Đẩy file JSON mới lên Repo GitHub
+    - name: Commit và Push file JSON
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add worldcup.json
-        git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-sync lịch bằng Puppeteer ngày $(date +'%Y-%m-%d')" && git push)
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Đồng bộ lịch EPG lách Cloudflare ngày $(date +'%Y-%m-%d')" && git push)
