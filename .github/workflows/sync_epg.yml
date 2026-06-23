@@ -2,11 +2,9 @@ name: Tự động cào lịch World Cup EPG
 
 on:
   schedule:
-    # Chạy tự động vào lúc 0h00 sáng mỗi ngày theo giờ VN (tức là 17:00 UTC hôm trước)
     - cron: '0 17 * * *'
-  workflow_dispatch: # Nút bấm để chạy tay bất cứ lúc nào
+  workflow_dispatch:
 
-# Cấp quyền write trực tiếp trong file cấu hình cho chắc chắn
 permissions:
   contents: write
 
@@ -16,12 +14,12 @@ jobs:
 
     steps:
     - name: Kiểm tra mã nguồn công việc
-      uses: actions/checkout@v4 # Nâng cấp lên v4 để xóa Warning Node.js
+      uses: actions/checkout@v4
 
     - name: Cài đặt môi trường PHP
       uses: shivammathur/setup-php@v2
       with:
-        php-version: '8.2' # Dùng bản PHP ổn định cao
+        php-version: '8.2'
 
     - name: Chạy script cào dữ liệu và tạo file JSON
       run: |
@@ -34,7 +32,7 @@ jobs:
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+        curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0");
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         $res = curl_exec($ch);
         curl_close($ch);
@@ -42,13 +40,27 @@ jobs:
         $api_data = json_decode($res, true);
         $matches = [];
         
+        echo "=== DANH SÁCH CHƯƠNG TRÌNH VTV6 HD HÔM NAY ===\n";
+        
         if (is_array($api_data)) {
             $programs = isset($api_data["schedule"]) ? $api_data["schedule"] : (isset($api_data["data"]) ? $api_data["data"] : $api_data);
             foreach ($programs as $prog) {
                 $title = $prog["title"] ?? "";
-                if (stripos($title, "World Cup") !== false || stripos($title, "Trực tiếp bóng đá") !== false || stripos($title, "Bóng đá") !== false) {
-                    $start_raw = $prog["start"] ?? "";
-                    $end_raw = $prog["end"] ?? "";
+                $start_raw = $prog["start"] ?? "";
+                $end_raw = $prog["end"] ?? "";
+                
+                if ($start_raw) {
+                    $match_date = date("Y-m-d", strtotime($start_raw));
+                    $start_time = date("H:i", strtotime($start_raw));
+                    
+                    // In thử ra Log của GitHub để mình xem tiêu đề gốc là gì
+                    if ($match_date === $today) {
+                        echo "- [$start_time] $title\n";
+                    }
+                }
+                
+                // Điều kiện lọc (Bổ sung thêm chữ "Bóng đá", "Thể thao" cho rộng cửa)
+                if (stripos($title, "World Cup") !== false || stripos($title, "Trực tiếp") !== false || stripos($title, "Bóng đá") !== false || stripos($title, "Thể thao") !== false) {
                     if ($start_raw && $end_raw) {
                         $match_date = date("Y-m-d", strtotime($start_raw));
                         if ($match_date === $today) {
@@ -65,6 +77,8 @@ jobs:
                 }
             }
         }
+        echo "==============================================\n";
+        echo "Tổng số trận đấu tìm thấy: " . count($matches) . "\n";
         file_put_contents("worldcup.json", json_encode($matches, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
         '
 
@@ -73,5 +87,4 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add worldcup.json
-        # Kiểm tra nếu file không có thay đổi gì thì không commit để tránh lỗi sập
         git diff --quiet && git diff --staged --quiet || (git commit -m "Tự động cập nhật lịch bóng đá ngày $(date +'%Y-%m-%d')" && git push)
