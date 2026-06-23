@@ -25,7 +25,6 @@ jobs:
       run: |
         php -r '
         date_default_timezone_set("Asia/Ho_Chi_Minh");
-        $today = date("Y-m-d");
         $api_url = "https://vnepg.site/api/schedule/vtv6hd";
         $vtv6_m3u8 = "https://devda.undo.it/Stream/index.php?id=vtv6&ext=.m3u8";
         
@@ -40,36 +39,26 @@ jobs:
         $api_data = json_decode($res, true);
         $matches = [];
         
-        // Trỏ chính xác vào mảng "items" từ API
         if (isset($api_data["items"]) && is_array($api_data["items"])) {
             foreach ($api_data["items"] as $prog) {
                 $title = $prog["title"] ?? "";
                 $desc = $prog["desc"] ?? "";
-                
-                // Ghép tiêu đề và mô tả lại để lọc cho chắc ăn
                 $full_text = $title . " " . $desc;
                 
-                // Lọc theo các trận Trực tiếp hoặc Tường thuật có chữ World Cup hoặc Bóng đá
                 if (stripos($full_text, "World Cup") !== false || stripos($full_text, "Bóng đá") !== false) {
-                    
-                    // Xử lý chuyển đổi timestamp mili-giây (chia cho 1000)
                     $start_ts = isset($prog["startMs"]) ? intval($prog["startMs"] / 1000) : 0;
                     $stop_ts = isset($prog["stopMs"]) ? intval($prog["stopMs"] / 1000) : 0;
                     
                     if ($start_ts > 0 && $stop_ts > 0) {
-                        $match_date = date("Y-m-d", $start_ts);
-                        
-                        // Nếu trùng ngày hôm nay, bốc lịch bỏ vào file
-                        if ($match_date === $today) {
-                            $matches[] = [
-                                "id" => "epg_wc_" . uniqid(),
-                                "day" => $today,
-                                "start_time" => date("H:i", $start_ts),
-                                "end_time" => date("H:i", $stop_ts),
-                                "m3u8_url" => $vtv6_m3u8,
-                                "created_at" => date("Y-m-d H:i:s") . " (GitHub Actions: " . ($desc ? $desc : $title) . ")"
-                            ];
-                        }
+                        // 🔴 THÁO XÍCH: Không check ngày hôm nay nữa, cứ có trận World Cup là hốt vào JSON hết!
+                        $matches[] = [
+                            "id" => "epg_wc_" . uniqid(),
+                            "day" => date("Y-m-d", $start_ts), // Lưu lại ngày của trận đấu đó trả về
+                            "start_time" => date("H:i", $start_ts),
+                            "end_time" => date("H:i", $stop_ts),
+                            "m3u8_url" => $vtv6_m3u8,
+                            "created_at" => date("Y-m-d H:i:s") . " (Bypass Date: " . ($desc ? $desc : $title) . ")"
+                        ];
                     }
                 }
             }
@@ -77,7 +66,7 @@ jobs:
         
         file_put_contents("worldcup.json", json_encode($matches, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
         echo "=== KẾT QUẢ CÀO ==_\n";
-        echo "Đã tìm thấy và ghi đè " . count($matches) . " trận đấu vào worldcup.json\n";
+        echo "Đã hốt tổng cộng " . count($matches) . " trận World Cup từ API vứt vào worldcup.json\n";
         '
 
     - name: Đẩy file JSON mới lên Repo GitHub
@@ -85,4 +74,4 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add worldcup.json
-        git diff --quiet && git diff --staged --quiet || (git commit -m "Tự động cập nhật lịch bóng đá ngày $(date +'%Y-%m-%d')" && git push)
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Tự động cập nhật toàn bộ lịch bóng đá có sẵn" && git push)
