@@ -32,7 +32,7 @@ jobs:
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0");
+        curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         $res = curl_exec($ch);
         curl_close($ch);
@@ -40,46 +40,44 @@ jobs:
         $api_data = json_decode($res, true);
         $matches = [];
         
-        echo "=== DANH SÁCH CHƯƠNG TRÌNH VTV6 HD HÔM NAY ===\n";
-        
-        if (is_array($api_data)) {
-            $programs = isset($api_data["schedule"]) ? $api_data["schedule"] : (isset($api_data["data"]) ? $api_data["data"] : $api_data);
-            foreach ($programs as $prog) {
+        // Trỏ chính xác vào mảng "items" từ API
+        if (isset($api_data["items"]) && is_array($api_data["items"])) {
+            foreach ($api_data["items"] as $prog) {
                 $title = $prog["title"] ?? "";
-                $start_raw = $prog["start"] ?? "";
-                $end_raw = $prog["end"] ?? "";
+                $desc = $prog["desc"] ?? "";
                 
-                if ($start_raw) {
-                    $match_date = date("Y-m-d", strtotime($start_raw));
-                    $start_time = date("H:i", strtotime($start_raw));
+                // Ghép tiêu đề và mô tả lại để lọc cho chắc ăn
+                $full_text = $title . " " . $desc;
+                
+                // Lọc theo các trận Trực tiếp hoặc Tường thuật có chữ World Cup hoặc Bóng đá
+                if (stripos($full_text, "World Cup") !== false || stripos($full_text, "Bóng đá") !== false) {
                     
-                    // In thử ra Log của GitHub để mình xem tiêu đề gốc là gì
-                    if ($match_date === $today) {
-                        echo "- [$start_time] $title\n";
-                    }
-                }
-                
-                // Điều kiện lọc (Bổ sung thêm chữ "Bóng đá", "Thể thao" cho rộng cửa)
-                if (stripos($title, "World Cup") !== false || stripos($title, "Trực tiếp") !== false || stripos($title, "Bóng đá") !== false || stripos($title, "Thể thao") !== false) {
-                    if ($start_raw && $end_raw) {
-                        $match_date = date("Y-m-d", strtotime($start_raw));
+                    // Xử lý chuyển đổi timestamp mili-giây (chia cho 1000)
+                    $start_ts = isset($prog["startMs"]) ? intval($prog["startMs"] / 1000) : 0;
+                    $stop_ts = isset($prog["stopMs"]) ? intval($prog["stopMs"] / 1000) : 0;
+                    
+                    if ($start_ts > 0 && $stop_ts > 0) {
+                        $match_date = date("Y-m-d", $start_ts);
+                        
+                        // Nếu trùng ngày hôm nay, bốc lịch bỏ vào file
                         if ($match_date === $today) {
                             $matches[] = [
                                 "id" => "epg_wc_" . uniqid(),
                                 "day" => $today,
-                                "start_time" => date("H:i", strtotime($start_raw)),
-                                "end_time" => date("H:i", strtotime($end_raw)),
+                                "start_time" => date("H:i", $start_ts),
+                                "end_time" => date("H:i", $stop_ts),
                                 "m3u8_url" => $vtv6_m3u8,
-                                "created_at" => date("Y-m-d H:i:s") . " (GitHub Actions)"
+                                "created_at" => date("Y-m-d H:i:s") . " (GitHub Actions: " . ($desc ? $desc : $title) . ")"
                             ];
                         }
                     }
                 }
             }
         }
-        echo "==============================================\n";
-        echo "Tổng số trận đấu tìm thấy: " . count($matches) . "\n";
+        
         file_put_contents("worldcup.json", json_encode($matches, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+        echo "=== KẾT QUẢ CÀO ==_\n";
+        echo "Đã tìm thấy và ghi đè " . count($matches) . " trận đấu vào worldcup.json\n";
         '
 
     - name: Đẩy file JSON mới lên Repo GitHub
