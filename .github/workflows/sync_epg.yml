@@ -1,0 +1,73 @@
+name: Tự động cào lịch World Cup EPG
+
+on:
+  schedule:
+    # Chạy tự động vào lúc 0h00 sáng mỗi ngày theo giờ VN (tức là 17:00 UTC hôm trước)
+    - cron: '0 17 * * *'
+  workflow_dispatch: # Nút bấm để bro có thể bấm "Chạy tay" bất cứ lúc nào trên GitHub
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Kiểm tra mã nguồn công việc
+      uses: actions/checkout@v3
+
+    - name: Cài đặt môi trường PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.1'
+
+    - name: Chạy script cào dữ liệu và tạo file JSON
+      run: |
+        php -r '
+        date_default_timezone_set("Asia/Ho_Chi_Minh");
+        $today = date("Y-m-d");
+        $api_url = "https://vnepg.site/api/schedule/vtv6hd";
+        $vtv6_m3u8 = "https://devda.undo.it/Stream/index.php?id=vtv6&ext=.m3u8";
+        
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $api_url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0");
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        $res = curl_exec($ch);
+        curl_close($ch);
+        
+        $api_data = json_decode($res, true);
+        $matches = [];
+        
+        if (is_array($api_data)) {
+            $programs = isset($api_data["schedule"]) ? $api_data["schedule"] : (isset($api_data["data"]) ? $api_data["data"] : $api_data);
+            foreach ($programs as $prog) {
+                $title = $prog["title"] ?? "";
+                if (stripos($title, "World Cup") !== false || stripos($title, "Trực tiếp bóng đá") !== false || stripos($title, "Bóng đá") !== false) {
+                    $start_raw = $prog["start"] ?? "";
+                    $end_raw = $prog["end"] ?? "";
+                    if ($start_raw && $end_raw) {
+                        $match_date = date("Y-m-d", strtotime($start_raw));
+                        if ($match_date === $today) {
+                            $matches[] = [
+                                "id" => "epg_wc_" . uniqid(),
+                                "day" => $today,
+                                "start_time" => date("H:i", strtotime($start_raw)),
+                                "end_time" => date("H:i", strtotime($end_raw)),
+                                "m3u8_url" => $vtv6_m3u8,
+                                "created_at" => date("Y-m-d H:i:s") . " (GitHub Actions)"
+                            ];
+                        }
+                    }
+                }
+            }
+        }
+        file_put_contents("worldcup.json", json_encode($matches, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+        '
+
+    - name: Đẩy file JSON mới lên Repo GitHub
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add worldcup.json
+        git commit -m "Tự động cập nhật lịch bóng đá ngày $(date +'%Y-%m-%d')" || exit 0
+        git push
