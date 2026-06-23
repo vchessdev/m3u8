@@ -26,7 +26,7 @@ jobs:
       with:
         php-version: '8.2'
 
-    - name: Chạy kịch bản cào dữ liệu qua Proxy
+    - name: Chạy kịch bản cào dữ liệu qua Proxy sạch
       run: |
         php -r '
         date_default_timezone_set("Asia/Ho_Chi_Minh");
@@ -34,45 +34,48 @@ jobs:
         $vtv6_m3u8 = "https://devda.undo.it/Stream/index.php?id=vtv6&ext=.m3u8";
         $target_url = "https://vnepg.site/api/schedule/vtv6hd";
         
-        // 🔴 DANH SÁCH PROXY LÁCH CLOUDFLARE CHO GITHUB
+        // 🔴 ĐỔI CHIẾN THUẬT: Truyền trực tiếp link không qua urlencode để proxy hiểu đúng
         $proxies = [
-            "https://api.allorigins.win/raw?url=" . urlencode($target_url),
-            "https://api.codetabs.com/v1/proxy/?quest=" . urlencode($target_url),
+            "https://proxy.cors.sh/" . $target_url,
+            "https://api.allorigins.win/raw?url=" . $target_url,
+            "https://api.codetabs.com/v1/proxy/?quest=" . $target_url,
             $target_url
         ];
         
         $api_data = null;
         foreach ($proxies as $url) {
-            echo "🔄 Đang thử kéo JSON qua cổng: $url\n";
+            echo "🔄 Đang fetch dữ liệu qua: $url\n";
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $url);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0");
+            curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
             curl_setopt($ch, CURLOPT_TIMEOUT, 15);
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
             $res = curl_exec($ch);
             curl_close($ch);
             
             $decoded = json_decode($res, true);
-            // Kiểm tra chắc chắn dữ liệu trả về phải là mảng và có ruột "items"
-            if (is_array($decoded) && isset($decoded["items"])) {
+            if (is_array($decoded) && (isset($decoded["items"]) || isset($decoded["channelId"]))) {
                 $api_data = $decoded;
-                echo "✅ Đã vượt tường lửa và lấy được dữ liệu JSON thành công!\n";
+                echo "✅ Thành công! Đã lấy được JSON hợp lệ.\n";
                 break;
             }
         }
         
         if (!$api_data) {
-            die("❌ LỖI TRẦM TRỌNG: Tất cả các cổng Proxy đều bị chặn. File sẽ không được ghi đè để tránh mất dữ liệu.\n");
+            die("❌ LỖI: Không proxy nào giải mã được cấu trúc JSON. Kết thúc build.\n");
         }
         
         $matches = [];
-        foreach ($api_data["items"] as $prog) {
+        $items = $api_data["items"] ?? [];
+        
+        foreach ($items as $prog) {
             $title = $prog["title"] ?? "";
             $desc = $prog["desc"] ?? "";
             $full_text = $title . " " . $desc;
             
-            // Tìm các trận đấu khớp từ khóa
+            // Quét từ khóa thông minh chấp cả lỗi chính tả "Worl Cup"
             if (stripos($full_text, "World") !== false || stripos($full_text, "Worl") !== false || stripos($full_text, "Bóng") !== false || stripos($full_text, "thể thao") !== false) {
                 
                 $start_ts = isset($prog["startMs"]) ? intval($prog["startMs"] / 1000) : 0;
@@ -81,7 +84,6 @@ jobs:
                 if ($start_ts > 0 && $stop_ts > 0) {
                     $match_date = date("Y-m-d", $start_ts);
                     
-                    // Nếu đúng ngày hôm nay thì hốt vào file
                     if ($match_date === $today) {
                         $matches[] = [
                             "id" => "epg_wc_" . uniqid(),
@@ -97,8 +99,8 @@ jobs:
         }
         
         file_put_contents("worldcup.json", json_encode($matches, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-        echo "=== THÀNH CÔNG ===\n";
-        echo "Đã đóng gói " . count($matches) . " trận đấu vào worldcup.json\n";
+        echo "=== KẾT QUẢ ĐÓNG GÓI ===\n";
+        echo "Tìm thấy " . count($matches) . " trận đấu phù hợp cho ngày hôm nay.\n";
         '
 
     - name: Commit và Push file JSON
@@ -106,4 +108,4 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add worldcup.json
-        git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-sync lịch bóng đá ngày $(date +'%Y-%m-%d')" && git push)
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Đồng bộ lịch EPG chuẩn ngày $(date +'%Y-%m-%d')" && git push)
