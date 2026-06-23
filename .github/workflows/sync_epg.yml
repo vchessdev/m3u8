@@ -13,72 +13,97 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Kiểm tra mã nguồn công việc
+    - name: Kiểm tra mã nguồn
       uses: actions/checkout@v4
 
-    - name: Cài đặt môi trường PHP
+    - name: Ép múi giờ hệ thống VN
+      run: |
+        sudo ln -sf /usr/share/zoneinfo/Asia/Ho_Chi_Minh /etc/localtime
+        echo "Asia/Ho_Chi_Minh" | sudo tee /etc/timezone
+
+    - name: Cài đặt PHP
       uses: shivammathur/setup-php@v2
       with:
         php-version: '8.2'
 
-    - name: Chạy script cào dữ liệu và tạo file JSON
+    - name: Chạy kịch bản cào dữ liệu qua Proxy
       run: |
         php -r '
         date_default_timezone_set("Asia/Ho_Chi_Minh");
         $today = date("Y-m-d");
-        $api_url = "https://vnepg.site/api/schedule/vtv6hd";
         $vtv6_m3u8 = "https://devda.undo.it/Stream/index.php?id=vtv6&ext=.m3u8";
+        $target_url = "https://vnepg.site/api/schedule/vtv6hd";
         
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $api_url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        $res = curl_exec($ch);
-        curl_close($ch);
+        // 🔴 DANH SÁCH PROXY LÁCH CLOUDFLARE CHO GITHUB
+        $proxies = [
+            "https://api.allorigins.win/raw?url=" . urlencode($target_url),
+            "https://api.codetabs.com/v1/proxy/?quest=" . urlencode($target_url),
+            $target_url
+        ];
         
-        $api_data = json_decode($res, true);
+        $api_data = null;
+        foreach ($proxies as $url) {
+            echo "🔄 Đang thử kéo JSON qua cổng: $url\n";
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0");
+            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            $res = curl_exec($ch);
+            curl_close($ch);
+            
+            $decoded = json_decode($res, true);
+            // Kiểm tra chắc chắn dữ liệu trả về phải là mảng và có ruột "items"
+            if (is_array($decoded) && isset($decoded["items"])) {
+                $api_data = $decoded;
+                echo "✅ Đã vượt tường lửa và lấy được dữ liệu JSON thành công!\n";
+                break;
+            }
+        }
+        
+        if (!$api_data) {
+            die("❌ LỖI TRẦM TRỌNG: Tất cả các cổng Proxy đều bị chặn. File sẽ không được ghi đè để tránh mất dữ liệu.\n");
+        }
+        
         $matches = [];
-        
-        if (isset($api_data["items"]) && is_array($api_data["items"])) {
-            foreach ($api_data["items"] as $prog) {
-                $title = $prog["title"] ?? "";
-                $desc = $prog["desc"] ?? "";
-                $full_text = $title . " " . $desc;
+        foreach ($api_data["items"] as $prog) {
+            $title = $prog["title"] ?? "";
+            $desc = $prog["desc"] ?? "";
+            $full_text = $title . " " . $desc;
+            
+            // Tìm các trận đấu khớp từ khóa
+            if (stripos($full_text, "World") !== false || stripos($full_text, "Worl") !== false || stripos($full_text, "Bóng") !== false || stripos($full_text, "thể thao") !== false) {
                 
-                // LỌC THÔNG MINH: Bắt cả chữ "World Cup", "Worl Cup" (lỗi chính tả của API) và "thể thao"
-                if (stripos($full_text, "World") !== false || stripos($full_text, "Worl") !== false || stripos($full_text, "thể thao") !== false) {
+                $start_ts = isset($prog["startMs"]) ? intval($prog["startMs"] / 1000) : 0;
+                $stop_ts = isset($prog["stopMs"]) ? intval($prog["stopMs"] / 1000) : 0;
+                
+                if ($start_ts > 0 && $stop_ts > 0) {
+                    $match_date = date("Y-m-d", $start_ts);
                     
-                    $start_ts = isset($prog["startMs"]) ? intval($prog["startMs"] / 1000) : 0;
-                    $stop_ts = isset($prog["stopMs"]) ? intval($prog["stopMs"] / 1000) : 0;
-                    
-                    if ($start_ts > 0 && $stop_ts > 0) {
-                        $match_date = date("Y-m-d", $start_ts);
-                        
-                        // Gom hết lịch của ngày hôm nay
-                        if ($match_date === $today) {
-                            $matches[] = [
-                                "id" => "epg_wc_" . uniqid(),
-                                "day" => $today,
-                                "start_time" => date("H:i", $start_ts),
-                                "end_time" => date("H:i", $stop_ts),
-                                "m3u8_url" => $vtv6_m3u8,
-                                "created_at" => date("Y-m-d H:i:s") . " (GitHub Actions: " . ($desc ? $desc : $title) . ")"
-                            ];
-                        }
+                    // Nếu đúng ngày hôm nay thì hốt vào file
+                    if ($match_date === $today) {
+                        $matches[] = [
+                            "id" => "epg_wc_" . uniqid(),
+                            "day" => $today,
+                            "start_time" => date("H:i", $start_ts),
+                            "end_time" => date("H:i", $stop_ts),
+                            "m3u8_url" => $vtv6_m3u8,
+                            "created_at" => date("Y-m-d H:i:s") . " (" . ($desc ? $desc : $title) . ")"
+                        ];
                     }
                 }
             }
         }
         
         file_put_contents("worldcup.json", json_encode($matches, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-        echo "=== KẾT QUẢ CÀO TỪ DATA THẬT ===\n";
-        echo "Đã tìm thấy và ghi " . count($matches) . " chương trình vào worldcup.json\n";
+        echo "=== THÀNH CÔNG ===\n";
+        echo "Đã đóng gói " . count($matches) . " trận đấu vào worldcup.json\n";
         '
 
-    - name: Đẩy file JSON mới lên Repo GitHub
+    - name: Commit và Push file JSON
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add worldcup.json
-        git diff --quiet && git diff --staged --quiet || (git commit -m "Cập nhật dữ liệu chuẩn ngày $(date +'%Y-%m-%d')" && git push)
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-sync lịch bóng đá ngày $(date +'%Y-%m-%d')" && git push)
